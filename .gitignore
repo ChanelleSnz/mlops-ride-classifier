@@ -1,0 +1,19 @@
+# Environnement Python
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Données (trop lourdes pour git)
+data/**
+!data/**/
+!data/**/.gitkeep
+
+# Modèles et sorties locales
+*.pt
+mlruns/
+mlartifacts/
+
+# Secrets et fichiers système
+.env
+.DS_Store
