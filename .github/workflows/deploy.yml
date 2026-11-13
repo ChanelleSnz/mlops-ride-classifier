@@ -1,0 +1,86 @@
+# Continuous Deployment to the local Kubernetes cluster (prod).
+# Runs on the self-hosted runner of the Mac, after "Docker images" succeeded on main.
+# Deploys the images tagged with the exact commit SHA, checks the API, rolls back on failure.
+name: Deploy to Kubernetes
+
+on:
+  workflow_run:
+    workflows: ["Docker images"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:  # manual (re)deploy of the current main
+
+permissions:
+  contents: read
+
+# Never two deployments at the same time; never cancel one half-way
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to local Kubernetes
+    # Only after a successful image build (never from a pull request)
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: [self-hosted, macOS, ARM64]
+    environment:
+      name: production
+      url: http://localhost:30851
+    env:
+      NS: ride-classifier
+      TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Check the cluster
+        run: |
+          kubectl config use-context docker-desktop
+          kubectl get nodes
+          kubectl get secret ride-classifier-secrets -n "$NS" > /dev/null \
+            || { echo "::error::Secret missing. Run once: kubectl create secret generic ride-classifier-secrets -n $NS --from-env-file=.env"; exit 1; }
+
+      - name: Pin the images to this commit
+        run: |
+          sed -i '' "s/newTag: latest/newTag: ${TAG}/" k8s/kustomization.yaml
+          grep -A2 "newName" k8s/kustomization.yaml
+
+      - name: Apply the manifests
+        run: kubectl apply -k k8s/
+
+      - name: Wait for the rollout
+        run: |
+          kubectl rollout status deploy/mlflow -n "$NS" --timeout=300s
+          kubectl rollout status deploy/api -n "$NS" --timeout=300s
+          kubectl rollout status deploy/webapp -n "$NS" --timeout=180s
+
+      - name: Smoke test the production API
+        run: |
+          curl -sf http://localhost:30800/health
+          echo
+          curl -sf http://localhost:30800/model
+          echo
+          curl -sf -F "file=@examples/ride_safe.csv" http://localhost:30800/predict
+          echo
+
+      - name: Roll back on failure
+        if: failure()
+        run: |
+          echo "::warning::Deployment of ${TAG} failed, rolling back to the previous version"
+          kubectl rollout undo deploy/api -n "$NS"
+          kubectl rollout undo deploy/webapp -n "$NS"
+          kubectl rollout undo deploy/mlflow -n "$NS"
+          kubectl rollout status deploy/api -n "$NS" --timeout=300s
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deployment ${{ job.status }}"
+            echo "Commit: \`${TAG}\`"
+            echo '```'
+            kubectl get deploy -n "$NS" -o custom-columns=NAME:.metadata.name,READY:.status.readyReplicas,IMAGE:.spec.template.spec.containers[0].image
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
