@@ -19,8 +19,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: ride-classifier-api:dev
-          imagePullPolicy: IfNotPresent
+          image: ride-classifier-api  # real name and tag set in kustomization.yaml
           env:
             - {name: MLFLOW_TRACKING_URI, value: "http://mlflow:5000"}
             - {name: MODEL_NAME, value: ride-classifier}
