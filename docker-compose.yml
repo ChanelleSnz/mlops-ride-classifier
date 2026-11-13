@@ -53,12 +53,17 @@ services:
       AWS_DEFAULT_REGION: us-east-1
       MLFLOW_BUCKET: mlflow
       MLFLOW_SERVER_ALLOWED_HOSTS: "localhost:*,127.0.0.1:*,mlflow:*"
-    command: >
-      sh -c "python /app/create_bucket.py &&
-             mlflow server --host 0.0.0.0 --port 5000
-             --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-             --artifacts-destination s3://mlflow
-             --serve-artifacts"
+    # All lines below have the same indentation, so YAML joins them into ONE line.
+    # (Extra indentation would keep the line breaks and the shell would drop the options.)
+    command:
+      - sh
+      - -c
+      - >-
+        python /app/create_bucket.py &&
+        mlflow server --host 0.0.0.0 --port 5000
+        --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+        --artifacts-destination s3://mlflow
+        --serve-artifacts
     ports:
       - "5001:5000"  # 5001 on the Mac: port 5000 is taken by macOS AirPlay Receiver
     restart: unless-stopped
