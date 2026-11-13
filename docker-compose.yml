@@ -53,6 +53,8 @@ services:
       AWS_DEFAULT_REGION: us-east-1
       MLFLOW_BUCKET: mlflow
       MLFLOW_SERVER_ALLOWED_HOSTS: "localhost:*,127.0.0.1:*,mlflow:*"
+      # Background job runner of MLflow 3 (GenAI features only, ~2 GB of RAM): not needed here
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
     # All lines below have the same indentation, so YAML joins them into ONE line.
     # (Extra indentation would keep the line breaks and the shell would drop the options.)
     command:
@@ -64,6 +66,7 @@ services:
         --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
         --artifacts-destination s3://mlflow
         --serve-artifacts
+        --workers 2
     ports:
       - "5001:5000"  # 5001 on the Mac: port 5000 is taken by macOS AirPlay Receiver
     healthcheck:
