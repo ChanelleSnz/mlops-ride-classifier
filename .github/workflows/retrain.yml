@@ -1,0 +1,91 @@
+# Retraining pipeline (bonus): fetch the data, retrain, register in the PROD MLflow,
+# and redeploy the API only if the new model became the champion.
+# Runs on the self-hosted runner of the Mac (it reaches the local Kubernetes cluster).
+name: Retrain model
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"  # every Monday at 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Shares the lock with the deployment: never retrain while deploying (and vice versa)
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  retrain:
+    name: Retrain and redeploy if better
+    runs-on: [self-hosted, macOS, ARM64]
+    environment:
+      name: production
+      url: http://localhost:30851
+    env:
+      NS: ride-classifier
+      MLFLOW_TRACKING_URI: http://localhost:30500
+      API_URL: http://localhost:30800
+      # Where the raw data lives on the runner (repository variable, with a default)
+      DATA_SOURCE: ${{ vars.RIDE_DATA_SOURCE || format('{0}/Projects/mlops-ride-classifier-draft/data/raw', '$HOME') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+
+      - name: Install the project
+        run: uv sync --locked --no-dev
+
+      - name: Fetch the data
+        run: |
+          SOURCE=$(eval echo "$DATA_SOURCE")
+          mkdir -p data/raw
+          cp "$SOURCE"/GBG500.parquet "$SOURCE"/GBG500_labels.csv data/raw/
+          ls -lh data/raw
+
+      - name: Check the production MLflow is up
+        run: curl -sf "$MLFLOW_TRACKING_URI/health"
+
+      - name: Champion before training
+        id: before
+        run: echo "version=$(uv run --no-sync python scripts/champion_version.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Preprocess
+        run: uv run --no-sync python -m ride_classifier.data
+
+      - name: Train, log and register (champion moves only if macro F1 improves)
+        run: uv run --no-sync python -m ride_classifier.train
+
+      - name: Champion after training
+        id: after
+        run: echo "version=$(uv run --no-sync python scripts/champion_version.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Redeploy the API with the new champion
+        if: steps.after.outputs.version != steps.before.outputs.version
+        run: |
+          # Restart the pods one by one (rolling update, no downtime): each loads the new champion
+          kubectl config use-context docker-desktop
+          kubectl rollout restart deploy/api -n "$NS"
+          kubectl rollout status deploy/api -n "$NS" --timeout=300s
+
+      - name: Smoke test
+        run: |
+          curl -sf "$API_URL/health"
+          echo
+          test "$(curl -sf "$API_URL/model" | python3 -c 'import sys,json;print(json.load(sys.stdin)["version"])')" \
+            = "${{ steps.after.outputs.version }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Retraining ${{ job.status }}"
+            echo "- Champion before: v${{ steps.before.outputs.version }}"
+            echo "- Champion after: v${{ steps.after.outputs.version }}"
+            if [ "${{ steps.after.outputs.version }}" != "${{ steps.before.outputs.version }}" ]; then
+              echo "- **New champion deployed** (rolling restart of the API)"
+            else
+              echo "- New model not better than the champion: production unchanged"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
