@@ -80,7 +80,7 @@ def _windows_for(ride_ids, rides_by_id, label_of):
 def build_dataset(raw_dir: Path = RAW_DIR, out_dir: Path = PROCESSED_DIR) -> None:
     """Split rides into train/test, cut them into windows, normalise and save."""
     rides, labels = load_raw(raw_dir)
-    label_of = dict(zip(labels["RIDE_ID"], labels["LABEL"]))
+    label_of = dict(zip(labels["RIDE_ID"], labels["LABEL"], strict=True))
 
     # Split by ride, not by window: windows of the same ride must never be
     # in both train and test, otherwise the test score is artificially high.
