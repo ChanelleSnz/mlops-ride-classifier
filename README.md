@@ -11,6 +11,16 @@ an API, a web app, CI/CD, a local Kubernetes production environment, orchestrati
 | **Docker images** | [`raniamehria/ride-classifier-api`](https://hub.docker.com/r/raniamehria/ride-classifier-api) · [`raniamehria/ride-classifier-webapp`](https://hub.docker.com/r/raniamehria/ride-classifier-webapp) · [`raniamehria/ride-classifier-mlflow`](https://hub.docker.com/r/raniamehria/ride-classifier-mlflow) (amd64 + arm64, tagged `latest` and `<commit sha>`) |
 | **Stack** | PyTorch · MLflow 3.18 · PostgreSQL · MinIO · FastAPI · Streamlit · Docker Compose · Kubernetes (Docker Desktop) · GitHub Actions · Airflow 3.4 · Prometheus · Grafana · uv |
 
+## Teams
+
+| Member | Role | Scope | PRs |
+|---|---|---|---|
+| **Rania** | Architecture, quality & observability | Project structure, tests & CI, Prometheus/Grafana monitoring, README | #1 · #9 · #14 · #17 |
+| **Luli** | Data & model | Data exploration, preprocessing, CNN & metrics, Airflow pipeline, feature store | #2 · #3 · #13 · #16 |
+| **Wei-Ling** | Platform & deployment | Dockerfiles, Docker Hub images, Kubernetes, self-hosted runner deployment | #8 · #10 · #11 · #12 |
+| **Chanelle** | Model lifecycle | MinIO storage, MLflow tracking & registry, FastAPI serving, Streamlit web app, retraining | #4 · #5 · #6 · #7 · #15 |
+
+Each PR is reviewed by at least one other member before merge. 
 ---
 
 ## Architecture
