@@ -112,6 +112,32 @@ services:
       - "8501:8501"
     restart: unless-stopped
 
+  # Orchestration of the training pipeline. Optional profile (heavy, ~1.5 GB of RAM):
+  #   docker compose --profile airflow up -d --build   ->  http://localhost:8080
+  airflow:
+    profiles: ["airflow"]
+    build:
+      context: .
+      dockerfile: docker/airflow.Dockerfile
+    image: ride-classifier-airflow:dev
+    command: standalone
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      # Local dev only: everyone is admin, no login page
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      RIDE_PROJECT_DIR: /opt/project
+      RIDE_API_URL: http://api:8000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./data:/opt/project/data
+    ports:
+      - "8080:8080"
+
 volumes:
   minio-data:
   postgres-data:
