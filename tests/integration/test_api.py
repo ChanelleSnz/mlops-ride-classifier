@@ -71,3 +71,12 @@ def test_predict_503_without_model(client_without_model, example_csv):
 def test_swagger_documents_all_routes(client):
     paths = client.get("/openapi.json").json()["paths"]
     assert {"/predict", "/health", "/model", "/model/reload"} <= set(paths)
+
+
+def test_metrics_count_requests_and_predictions(client, example_csv):
+    client.post("/predict", files=upload(example_csv))
+    metrics = client.get("/metrics/").text
+    assert 'model_predictions_total{label="Bad weather"}' in metrics
+    assert 'api_http_requests_total{method="POST",route="/predict",status="200"}' in metrics
+    assert "model_prediction_confidence_bucket" in metrics
+    assert "input_ride_measurements_count" in metrics

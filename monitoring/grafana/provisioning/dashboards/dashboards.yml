@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: ride-classifier
+    folder: Ride Classifier
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
