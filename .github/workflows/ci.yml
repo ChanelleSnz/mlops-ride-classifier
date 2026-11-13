@@ -1,0 +1,51 @@
+# Continuous Integration: every pull request (and every push to main) must pass
+# code quality checks and the unit + integration tests before it can be merged.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push on the same branch cancels the previous, now useless, run
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      # Actions are pinned to a commit SHA: a tag can be moved, a SHA cannot
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          enable-cache: true
+      - name: Install dev tools only
+        run: uv sync --locked --only-dev
+      - name: Lint
+        run: uv run --no-sync ruff check --output-format=github .
+      - name: Formatting
+        run: uv run --no-sync ruff format --check .
+
+  test:
+    name: Tests (unit + integration)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          enable-cache: true
+      - name: Install project and dev dependencies (PyTorch CPU on Linux)
+        run: uv sync --locked
+      - name: Run tests with coverage
+        run: uv run --no-sync pytest --cov --cov-report=term-missing --cov-report=xml
+      - name: Keep the coverage report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: coverage-report
+          path: coverage.xml

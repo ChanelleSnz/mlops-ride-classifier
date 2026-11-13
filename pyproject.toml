@@ -28,7 +28,11 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "ipykernel>=7.4.0",
+    "pytest>=9.2.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.5",
 ]
 webapp = [
     "requests>=2.34.2",
@@ -44,3 +48,23 @@ torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "N"]
+# N803/N806: X_train, X_test... upper-case X for a data matrix is the standard ML convention
+ignore = ["N803", "N806"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ride_classifier"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not e2e'"
+markers = ["e2e: needs the running Docker Compose stack (run with: pytest -m e2e)"]
+
+[tool.coverage.run]
+source = ["ride_classifier"]

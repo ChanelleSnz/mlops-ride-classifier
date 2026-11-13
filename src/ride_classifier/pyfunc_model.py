@@ -37,7 +37,7 @@ class RideClassifier(mlflow.pyfunc.PythonModel):
             [
                 {
                     "label": CLASSES[int(proba.argmax())],
-                    **{f"proba_{c}": float(p) for c, p in zip(CLASSES, proba)},
+                    **{f"proba_{c}": float(p) for c, p in zip(CLASSES, proba, strict=True)},
                 }
             ]
         )
