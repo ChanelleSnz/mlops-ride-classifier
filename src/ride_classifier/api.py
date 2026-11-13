@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import io
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Annotated
 
 import mlflow
 import pandas as pd
-from fastapi import FastAPI, File, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from mlflow.tracking import MlflowClient
+from prometheus_client import Counter, Gauge, Histogram, make_asgi_app
 from pydantic import BaseModel, Field
 
 from ride_classifier.data import CLASSES, SENSORS
@@ -24,6 +26,30 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "ride-classifier")
 MODEL_ALIAS = os.environ.get("MODEL_ALIAS", "champion")
 REQUIRED_COLUMNS = ["time_index", *SENSORS]
 MAX_ROWS = 20_000  # about 33 minutes of measurements at 10 per second
+
+# --- Prometheus metrics (scraped on /metrics) -------------------------------------
+# API layer: traffic, errors, latency
+HTTP_REQUESTS = Counter("api_http_requests_total", "HTTP requests", ["method", "route", "status"])
+HTTP_LATENCY = Histogram(
+    "api_http_request_duration_seconds",
+    "HTTP request duration",
+    ["route"],
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10),
+)
+# Model layer: what the model predicts and how sure it is (a shift is an early sign of drift)
+PREDICTIONS = Counter("model_predictions_total", "Predictions by predicted class", ["label"])
+CONFIDENCE = Histogram(
+    "model_prediction_confidence",
+    "Probability of the predicted class",
+    buckets=(0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+# Data layer: what the API receives
+RIDE_LENGTH = Histogram(
+    "input_ride_measurements",
+    "Number of measurements in the uploaded ride",
+    buckets=(600, 1500, 2500, 3500, 5000, 10000, 20000),
+)
+MODEL_INFO = Gauge("model_info", "Model currently served (value is 1)", ["name", "alias", "version"])
 
 
 class ModelInfo(BaseModel):
@@ -61,6 +87,8 @@ class ModelStore:
         version = MlflowClient().get_model_version_by_alias(MODEL_NAME, MODEL_ALIAS)
         self.model = mlflow.pyfunc.load_model(f"models:/{MODEL_NAME}@{MODEL_ALIAS}")
         self.info = ModelInfo(name=MODEL_NAME, alias=MODEL_ALIAS, version=version.version, run_id=version.run_id)
+        MODEL_INFO.clear()
+        MODEL_INFO.labels(MODEL_NAME, MODEL_ALIAS, version.version).set(1)
 
 
 store = ModelStore()
@@ -86,6 +114,21 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.mount("/metrics", make_asgi_app())
+
+
+@app.middleware("http")
+async def record_metrics(request: Request, call_next):
+    """Count every request and measure its duration (except the /metrics scrapes themselves)."""
+    if request.url.path.startswith("/metrics"):
+        return await call_next(request)
+    start = time.perf_counter()
+    response = await call_next(request)
+    route = request.scope.get("route")
+    path = route.path if route else "unknown"  # template path: no unbounded label values
+    HTTP_LATENCY.labels(path).observe(time.perf_counter() - start)
+    HTTP_REQUESTS.labels(request.method, path, str(response.status_code)).inc()
+    return response
 
 
 def read_ride(content: bytes) -> pd.DataFrame:
@@ -144,10 +187,14 @@ async def predict(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "No model loaded, try POST /model/reload")
 
     ride = read_ride(await file.read())
+    RIDE_LENGTH.observe(len(ride))
     result = store.model.predict(ride).iloc[0]
+    probabilities = {c: round(float(result[f"proba_{c}"]), 4) for c in CLASSES}
+    PREDICTIONS.labels(result["label"]).inc()
+    CONFIDENCE.observe(probabilities[result["label"]])
     return Prediction(
         label=result["label"],
-        probabilities={c: round(float(result[f"proba_{c}"]), 4) for c in CLASSES},
+        probabilities=probabilities,
         n_measurements=len(ride),
         model=store.info,
     )

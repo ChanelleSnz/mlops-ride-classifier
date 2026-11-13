@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY webapp ./webapp
 COPY examples ./examples
 
-RUN useradd --create-home app
+RUN useradd --create-home app && chmod -R a+rX /app/webapp /app/examples
 USER app
 
 EXPOSE 8501

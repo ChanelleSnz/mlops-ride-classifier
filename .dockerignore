@@ -13,3 +13,5 @@ tests
 k8s
 dags
 .env
+monitoring
+scripts
