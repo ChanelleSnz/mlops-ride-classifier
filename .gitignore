@@ -17,3 +17,6 @@ mlartifacts/
 # Secrets et fichiers système
 .env
 .DS_Store
+
+# Modèles entraînés (stockés par MLflow, pas par git)
+models/
