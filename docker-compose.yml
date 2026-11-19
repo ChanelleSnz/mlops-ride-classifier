@@ -1,4 +1,4 @@
-# Local "dev" environment: MinIO (artifact storage) + PostgreSQL (MLflow metadata) + MLflow
+# Local "dev" environment: MinIO (artifacts) + PostgreSQL (MLflow metadata) + MLflow + API + web app
 # Start:  docker compose up -d --build
 # Stop:   docker compose down        (add -v to also delete the stored data)
 
@@ -66,6 +66,47 @@ services:
         --serve-artifacts
     ports:
       - "5001:5000"  # 5001 on the Mac: port 5000 is taken by macOS AirPlay Receiver
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    image: ride-classifier-api:dev
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_NAME: ride-classifier
+      MODEL_ALIAS: champion
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+    restart: unless-stopped
+
+  webapp:
+    build:
+      context: .
+      dockerfile: docker/webapp.Dockerfile
+    image: ride-classifier-webapp:dev
+    depends_on:
+      - api
+    environment:
+      API_URL: http://api:8000
+      API_PUBLIC_URL: http://localhost:8000
+    ports:
+      - "8501:8501"
     restart: unless-stopped
 
 volumes:
