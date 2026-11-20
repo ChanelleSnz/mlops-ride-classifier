@@ -1,0 +1,15 @@
+# Keep the build context small: Docker only needs the code and the lock files
+.git
+.github
+.venv
+**/__pycache__
+data
+models
+mlruns
+mlartifacts
+notebooks
+docs
+tests
+k8s
+dags
+.env

@@ -15,6 +15,8 @@ import requests
 import streamlit as st
 
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
+# Address of the API as seen from the browser (inside Docker, API_URL is http://api:8000)
+API_PUBLIC_URL = os.environ.get("API_PUBLIC_URL", API_URL)
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 SENSORS = {
     "Accelerometer (m/s²)": ["ax", "ay", "az"],
@@ -38,14 +40,14 @@ def predict(csv_bytes: bytes, filename: str) -> requests.Response:
 
 with st.sidebar:
     st.header("API")
-    st.caption(API_URL)
+    st.caption(API_PUBLIC_URL)
     health = api_status()
     if health:
         model = health["model"]
         st.success(f"Ready · model **{model['name']}** v{model['version']} (@{model['alias']})")
     else:
         st.error("API unreachable or no model loaded")
-    st.markdown(f"[Swagger documentation]({API_URL}/docs)")
+    st.markdown(f"[Swagger documentation]({API_PUBLIC_URL}/docs)")
 
 st.title("🛴 Ride Classifier")
 st.write(
