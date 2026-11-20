@@ -1,0 +1,62 @@
+# MinIO: S3-compatible storage for MLflow artifacts (models, figures)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  labels: {app: minio}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}  # one volume, one pod at a time
+  selector:
+    matchLabels: {app: minio}
+  template:
+    metadata:
+      labels: {app: minio}
+    spec:
+      securityContext:
+        runAsUser: 0  # the volume is owned by root (same as in docker-compose)
+      containers:
+        - name: minio
+          # Official minio/minio images were removed from Docker Hub in September 2026
+          image: cgr.dev/chainguard/minio:latest
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom: {secretKeyRef: {name: ride-classifier-secrets, key: MINIO_ROOT_USER}}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom: {secretKeyRef: {name: ride-classifier-secrets, key: MINIO_ROOT_PASSWORD}}
+          ports:
+            - {name: s3, containerPort: 9000}
+            - {name: console, containerPort: 9001}
+          readinessProbe:
+            tcpSocket: {port: 9000}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: minio-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+spec:
+  type: NodePort
+  selector: {app: minio}
+  ports:
+    - {name: s3, port: 9000, targetPort: 9000}
+    - {name: console, port: 9001, targetPort: 9001, nodePort: 30901}

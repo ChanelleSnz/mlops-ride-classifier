@@ -1,0 +1,58 @@
+# Prediction API: 2 replicas, updated one pod at a time with no downtime
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels: {app: api}
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0  # never remove an old pod before a new one is ready
+      maxSurge: 1
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      containers:
+        - name: api
+          image: ride-classifier-api:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: MLFLOW_TRACKING_URI, value: "http://mlflow:5000"}
+            - {name: MODEL_NAME, value: ride-classifier}
+            - {name: MODEL_ALIAS, value: champion}
+          ports:
+            - containerPort: 8000
+          # Ready = a model is loaded (/health returns 503 otherwise): no traffic before that
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 10
+            failureThreshold: 3
+          # Startup = the process answers at all. Gives up to 5 minutes to start
+          # (loading the model can be slow, or wait for MLflow) before liveness takes over
+          startupProbe:
+            httpGet: {path: /docs, port: 8000}
+            periodSeconds: 10
+            failureThreshold: 30
+          # Alive = the process still answers (a pod without model is not restarted in a loop)
+          livenessProbe:
+            httpGet: {path: /docs, port: 8000}
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests: {cpu: 250m, memory: 768Mi}
+            limits: {memory: 2Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+spec:
+  type: NodePort
+  selector: {app: api}
+  ports:
+    - {port: 8000, targetPort: 8000, nodePort: 30800}
