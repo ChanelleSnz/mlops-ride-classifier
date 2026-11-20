@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import os
 from contextlib import asynccontextmanager
+from typing import Annotated
 
 import mlflow
 import pandas as pd
@@ -92,7 +93,7 @@ def read_ride(content: bytes) -> pd.DataFrame:
     try:
         ride = pd.read_csv(io.BytesIO(content))
     except Exception as error:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Not a readable CSV file: {error}")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Not a readable CSV file: {error}") from error
 
     missing = [c for c in REQUIRED_COLUMNS if c not in ride.columns]
     if missing:
@@ -128,15 +129,16 @@ def reload_model():
     try:
         store.load()
     except Exception as error:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Could not load the model: {error}")
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Could not load the model: {error}") from error
     return store.info
 
 
 @app.post("/predict", response_model=Prediction, tags=["prediction"], summary="Classify one ride")
 async def predict(
-    file: UploadFile = File(
-        description="CSV of ONE ride with columns time_index, ax, ay, az, rx, ry, rz (one row per measurement)"
-    ),
+    file: Annotated[
+        UploadFile,
+        File(description="CSV of ONE ride with columns time_index, ax, ay, az, rx, ry, rz (one row per measurement)"),
+    ],
 ):
     if store.model is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "No model loaded, try POST /model/reload")

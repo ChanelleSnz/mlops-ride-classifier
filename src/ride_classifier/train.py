@@ -89,8 +89,14 @@ def train(params: dict = PARAMS):
 def confusion_matrix_figure(y_true: np.ndarray, y_pred: np.ndarray):
     fig, ax = plt.subplots(figsize=(7, 6))
     ConfusionMatrixDisplay.from_predictions(
-        y_true, y_pred, labels=list(range(len(CLASSES))), display_labels=CLASSES,
-        xticks_rotation=45, cmap="Blues", ax=ax, colorbar=False,
+        y_true,
+        y_pred,
+        labels=list(range(len(CLASSES))),
+        display_labels=CLASSES,
+        xticks_rotation=45,
+        cmap="Blues",
+        ax=ax,
+        colorbar=False,
     )
     ax.set_title("Test set, one prediction per ride")
     fig.tight_layout()
@@ -136,8 +142,7 @@ def log_model(model: nn.Module) -> str:
             input_example=example,
             registered_model_name=MODEL_NAME,
             pip_requirements=[
-                f"{package}=={version(package)}"
-                for package in ["torch", "pandas", "numpy", "scikit-learn", "pyarrow"]
+                f"{package}=={version(package)}" for package in ["torch", "pandas", "numpy", "scikit-learn", "pyarrow"]
             ],
         )
     return info.registered_model_version
