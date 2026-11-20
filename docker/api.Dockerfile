@@ -19,8 +19,8 @@ COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
-# Do not run as root
-RUN useradd --create-home app
+# Do not run as root (and make sure that user can read the code, whatever the local file permissions)
+RUN useradd --create-home app && chmod -R a+rX /app/src
 USER app
 
 EXPOSE 8000

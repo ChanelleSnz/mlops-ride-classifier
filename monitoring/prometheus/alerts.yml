@@ -1,0 +1,37 @@
+# Alert rules (visible in Prometheus > Alerts). No Alertmanager: they are shown, not sent.
+groups:
+  - name: ride-classifier
+    rules:
+      - alert: ApiDown
+        expr: up{job="ride-classifier-api"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "The prediction API does not answer Prometheus"
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(api_http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(api_http_requests_total[5m])), 1e-9) > 0.05
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "More than 5% of API requests fail with a server error"
+
+      - alert: SlowPredictions
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(api_http_request_duration_seconds_bucket{route="/predict"}[5m]))) > 2
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "95% of predictions should take less than 2 s"
+
+      - alert: LowModelConfidence
+        expr: |
+          sum(rate(model_prediction_confidence_sum[1h]))
+            / clamp_min(sum(rate(model_prediction_confidence_count[1h])), 1e-9) < 0.5
+          and sum(increase(model_prediction_confidence_count[1h])) > 20
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Average confidence below 50%: incoming rides may differ from training data (drift)"
