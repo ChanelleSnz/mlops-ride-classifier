@@ -19,8 +19,7 @@ spec:
           command: ["sh", "-c", "until pg_isready -h postgres -p 5432; do echo waiting for postgres; sleep 2; done"]
       containers:
         - name: mlflow
-          image: ride-classifier-mlflow:dev
-          imagePullPolicy: IfNotPresent
+          image: ride-classifier-mlflow  # real name and tag set in kustomization.yaml
           command: ["sh", "-c"]
           args:
             - >-

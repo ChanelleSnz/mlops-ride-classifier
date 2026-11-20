@@ -14,3 +14,15 @@ resources:
   - webapp.yaml
 labels:
   - pairs: {project: ride-classifier}
+# Images published on Docker Hub by the "Docker images" workflow.
+# Manual deploy uses latest; the CD workflow replaces latest with the exact commit SHA.
+images:
+  - name: ride-classifier-api
+    newName: raniamehria/ride-classifier-api
+    newTag: latest
+  - name: ride-classifier-webapp
+    newName: raniamehria/ride-classifier-webapp
+    newTag: latest
+  - name: ride-classifier-mlflow
+    newName: raniamehria/ride-classifier-mlflow
+    newTag: latest
