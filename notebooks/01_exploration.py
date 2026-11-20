@@ -1,4 +1,5 @@
 """Exploration des données GBG500."""
+
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -27,7 +28,7 @@ duration = labels.set_index("RIDE_ID").join(duration)
 print(duration.groupby("LABEL")["seconds"].describe().round(0))
 
 fig, axes = plt.subplots(5, 1, figsize=(12, 14), sharex=True)
-for ax, (label, group) in zip(axes, labels.groupby("LABEL")):
+for ax, (label, group) in zip(axes, labels.groupby("LABEL"), strict=True):
     ride_id = group["RIDE_ID"].iloc[0]
     ride = rides[rides["ride_id"] == ride_id].set_index("time_index")
     ride[SENSORS].plot(ax=ax, linewidth=0.6, legend=False)
