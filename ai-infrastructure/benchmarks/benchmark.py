@@ -157,6 +157,42 @@ def load_worker(api_url: str, bodies: list[bytes], offset: int, step: int, deadl
     return ok, failed, timings
 
 
+COLD_LOAD = """
+import sys, time
+start = time.perf_counter()
+import mlflow.pyfunc
+imported = time.perf_counter()
+mlflow.pyfunc.load_model(sys.argv[1])
+print(imported - start, time.perf_counter() - imported)
+"""
+
+
+def benchmark_loading(ctx: Context, model_uri: str, repeats: int) -> Path:
+    """Model loading time: download from the registry, cold load in a new process, warm reload.
+
+    Cold = what an API pod pays at (re)start (Python imports + load); warm = POST /model/reload.
+    Returns the local folder of the downloaded model.
+    """
+    start = time.perf_counter()
+    local_model = Path(mlflow.artifacts.download_artifacts(model_uri))
+    ctx.add("model_download_time", (time.perf_counter() - start) * 1000, "ms", notes="registry -> local files, once")
+
+    imports, loads = [], []
+    for _ in range(repeats):
+        result = subprocess.run([sys.executable, "-c", COLD_LOAD, str(local_model)], capture_output=True, text=True)
+        import_s, load_s = map(float, result.stdout.split()[-2:])
+        imports.append(import_s * 1000)
+        loads.append(load_s * 1000)
+    notes = f"new Python process, median of {repeats}"
+    ctx.add("model_cold_import_time", np.median(imports), "ms", repetitions=repeats, notes=f"import mlflow; {notes}")
+    ctx.add("model_cold_load_time", np.median(loads), "ms", repetitions=repeats, notes=f"load_model; {notes}")
+
+    mlflow.pyfunc.load_model(str(local_model))  # first in-process load (imports), not timed
+    warm = time_calls(lambda path: mlflow.pyfunc.load_model(path), [str(local_model)], 0, repeats)
+    ctx.add("model_warm_load_time", np.median(warm), "ms", repetitions=repeats, notes="load_model again, same process")
+    return local_model
+
+
 def benchmark_model(ctx: Context, model, rides, warmup: int, repetitions: int) -> None:
     frames = [ride for _, ride, _ in rides]
 
@@ -234,6 +270,7 @@ def main() -> None:
     parser.add_argument("--model-uri", default="models:/ride-classifier@champion")
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--repetitions", type=int, default=200)
+    parser.add_argument("--load-repeats", type=int, default=5, help="repetitions of the model loading measurements")
     parser.add_argument("--runs", type=int, default=3, help="repeat the latency/throughput measurements")
     parser.add_argument("--api-url", help="also benchmark a running API, e.g. http://localhost:8000")
     parser.add_argument("--concurrency", type=int, nargs="+", default=[1, 4, 8])
@@ -251,7 +288,7 @@ def main() -> None:
     rss_before = peak_rss_mb()
     rides = test_rides()
     rss_data = peak_rss_mb()
-    local_model = Path(mlflow.artifacts.download_artifacts(args.model_uri))
+    local_model = benchmark_loading(ctx, args.model_uri, args.load_repeats)
     model = mlflow.pyfunc.load_model(str(local_model))
     ctx.add("process_peak_rss_after_load", peak_rss_mb(), "MB", notes=f"data loaded: {rss_data - rss_before:.0f} MB")
 

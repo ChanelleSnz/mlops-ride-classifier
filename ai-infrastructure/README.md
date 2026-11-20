@@ -46,10 +46,10 @@ Kubernetes cluster of Docker Desktop.
 | Batch size (training) | 64 windows | `train.PARAMS` |
 | Hardware | Apple M4, 10 CPU cores, 16 GB unified memory, macOS 15.7.2; MPS available but **not used** (training is CPU) | [measured] `sysctl`, `torch.backends.mps` |
 | GPU / VRAM | None used | — |
-| Preprocessing duration | **4.8 s** wall, peak RSS 731 MB (350 train rides → 3,026 windows, 150 test rides → 1,323 windows) | [measured] `/usr/bin/time -l python -m ride_classifier.data`, [log](benchmarks/raw/preprocess.log) |
-| Training duration | **82.8 s** wall (20 epochs, CPU, includes baselines, feature store model and MLflow logging) | [measured] `/usr/bin/time -l python -m ride_classifier.train`, [log](benchmarks/raw/training.log) |
+| Preprocessing duration | **4.8 s** wall, peak RSS 731 MB (350 train rides → 3,026 windows, 150 test rides → 1,323 windows) | [measured] `/usr/bin/time -l python -m ride_classifier.data` |
+| Training duration | **82.8 s** wall (20 epochs, CPU, includes baselines, feature store model and MLflow logging) | [measured] `/usr/bin/time -l python -m ride_classifier.train` |
 | Peak training RAM | **970 MB** (max RSS) | [measured] same command |
-| API process RAM | **≈ 225 MB** after load (median of 3 runs; one run reached 439 MB). k8s request 768 Mi, limit 2 Gi | [measured] `ps rss` of the uvicorn process |
+| API process RAM | **≈ 218 MB** after load (median of 3 runs; one run reached 435 MB). k8s request 768 Mi, limit 2 Gi | [measured] `ps rss` of the uvicorn process |
 
 ## 3. Baseline benchmark
 
@@ -62,19 +62,24 @@ Procedure, charts and interpretation: [benchmarks/benchmark.ipynb](benchmarks/be
 | Model and version | `ride-classifier` v1 (@champion), macro F1 0.272 (same as the README champion v1) | PyTorch 2.15.0 CPU, MLflow 3.18 pyfunc; trained with `train.py` into a local SQLite MLflow registry |
 | Hardware | Apple M4, 10 cores (4 torch threads), 16 GB, macOS 15.7 | shared with other Docker stacks ([background load](benchmarks/raw/background-load.txt)); no GPU |
 | Model size (MB) | 0.11 (weights) · 1.27 (MLflow artifact) | `ride_cnn.pt` state_dict / whole pyfunc folder |
-| Mean latency (ms) | **model 2.04** [1.83–2.25] · **API 4.23** [3.67–6.11] | model: `pyfunc.predict` in-process; API: `POST /predict` (CSV upload), 1 uvicorn worker, concurrency 1 |
-| p95 latency (ms) | **model 2.97** [2.64–4.83] · **API 6.00** [4.48–10.70] | same |
-| Throughput (requests/s) | **API 206** at 1 client [204–208] · 206 at 4 [187–269] · 232 at 8 [183–243] | 20 s closed loop per level, 0 errors; model alone: 491 rides/s sequential |
-| Memory usage (MB) | API process ≈ 225 [213–439] | RSS of the uvicorn process after each load test |
+| Model loading time | **cold ≈ 5.0 s** (imports 2,225 ms + `load_model` 2,733 ms) · **warm reload 8 ms** · download 5 ms | cold: new Python process, median of 5 = API pod start; warm: `load_model` again in the same process = `POST /model/reload`; download from the local registry (a file copy; with the prod MinIO it adds network time) |
+| Mean latency (ms) | **model 1.78** [1.76–2.03] · **API 4.48** [3.91–5.43] | model: `pyfunc.predict` in-process; API: `POST /predict` (CSV upload), 1 uvicorn worker, concurrency 1 |
+| p95 latency (ms) | **model 2.34** [2.33–3.26] · **API 6.51** [5.29–11.23] | same |
+| Throughput (requests/s) | **API 219** at 1 client [158–223] · 226 at 4 [148–253] · 245 at 8 [245–246] | 20 s closed loop per level, 0 errors; model alone: 562 rides/s sequential |
+| Memory usage (MB) | API process ≈ 218 [218–435] | RSS of the uvicorn process after each load test |
 | Classification quality | macro F1 **0.272**, accuracy 0.607 | 150 held-out rides (`data.split_rides`) |
 
 Main findings:
 
-- **Where the time goes** (model level, 2.0 ms): preprocessing 0.50 ms, CNN forward 0.76 ms, the rest is pyfunc
+- **Where the time goes** (model level, 1.8 ms): preprocessing 0.49 ms, CNN forward 0.77 ms, the rest is pyfunc
   overhead (schema check, DataFrame output). The API adds ≈ 2 ms (HTTP, multipart, CSV parsing, validation).
-- **One worker serves one request at a time**: throughput stays ≈ 200–230 requests/s from 1 to 8 clients, while p95
-  latency grows from 8 ms to 32 ms (4 clients) and 58 ms (8 clients). Cause: `/predict` is `async def` but calls the
+- **One worker serves one request at a time**: throughput stays ≈ 220–245 requests/s from 1 to 8 clients, while p95
+  latency grows from 7 ms to 29 ms (4 clients) and 49 ms (8 clients). Cause: `/predict` is `async def` but calls the
   model synchronously, which blocks the uvicorn event loop. Scaling = more workers / replicas, not more concurrency.
+- **Loading dominates start-up, not the model**: a cold start costs ≈ 5 s, almost all Python / MLflow / PyTorch
+  imports (the weights are 0.1 MB), while a warm reload takes 8 ms. Hot-reloading a new champion with
+  `POST /model/reload` is therefore much cheaper than restarting pods; on Kubernetes the 5 s cold start is covered by
+  the startup probe (up to 5 min) and the rolling update keeps the old pods serving meanwhile.
 - **Not tested**: GPU, the Kubernetes deployment (2 replicas), the production MLflow. The benchmark can be re-run
   against prod by setting `MLFLOW_TRACKING_URI` (see the notebook).
 - During the first training attempt PyTorch raised a transient internal error
