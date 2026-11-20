@@ -1,0 +1,5 @@
+# Everything of the project lives in its own namespace: easy to list, easy to delete
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ride-classifier
