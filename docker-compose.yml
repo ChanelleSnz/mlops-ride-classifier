@@ -166,6 +166,7 @@ services:
     volumes:
       - ./dags:/opt/airflow/dags
       - ./data:/opt/project/data
+      - ./feature_repo/data:/opt/project/feature_repo/data  # feature store: offline parquet, registry, online store
     ports:
       - "8080:8080"
 
