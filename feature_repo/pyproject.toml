@@ -1,0 +1,22 @@
+# Separate environment for Feast.
+# Feast needs pandas < 3, the ride_classifier project uses pandas 3: like Airflow, Feast gets its own
+# virtual env. The two sides only exchange parquet files (features in, training set out).
+[project]
+name = "ride-feature-store"
+version = "0.1.0"
+description = "Feast feature store for the ride classifier (ride-level features)"
+requires-python = "==3.12.*"
+dependencies = [
+    "feast==0.68.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

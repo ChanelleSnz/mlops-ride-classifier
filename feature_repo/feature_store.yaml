@@ -1,0 +1,14 @@
+# Feast feature store, local mode: everything is a file, nothing to run.
+#   offline store: the parquet file written by `python -m ride_classifier.features` (training)
+#   online store:  SQLite, filled by `materialize` (low-latency lookup of one ride's features)
+#   registry:      SQLite file holding the feature definitions applied from definitions.py
+# Relative paths are relative to this folder. data/ is not versioned (see .gitignore).
+project: ride_classifier
+provider: local
+registry: data/registry.db
+online_store:
+  type: sqlite
+  path: data/online_store.db
+offline_store:
+  type: file
+entity_key_serialization_version: 3

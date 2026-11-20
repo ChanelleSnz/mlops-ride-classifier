@@ -67,6 +67,16 @@ def normalize(windows: np.ndarray, stats: dict[str, list[float]]) -> np.ndarray:
     return ((windows - mean) / std).astype(np.float32)
 
 
+def split_rides(labels: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """Split ride ids into train/test, stratified by class.
+
+    Split by ride, not by window: windows of the same ride must never be
+    in both train and test, otherwise the test score is artificially high.
+    Shared by the CNN and the feature store model, so both are evaluated on the same rides.
+    """
+    return train_test_split(labels["RIDE_ID"], test_size=TEST_SIZE, stratify=labels["LABEL"], random_state=SEED)
+
+
 def _windows_for(ride_ids, rides_by_id, label_of):
     X, y, owner = [], [], []
     for ride_id in ride_ids:
@@ -82,14 +92,7 @@ def build_dataset(raw_dir: Path = RAW_DIR, out_dir: Path = PROCESSED_DIR) -> Non
     rides, labels = load_raw(raw_dir)
     label_of = dict(zip(labels["RIDE_ID"], labels["LABEL"], strict=True))
 
-    # Split by ride, not by window: windows of the same ride must never be
-    # in both train and test, otherwise the test score is artificially high.
-    train_ids, test_ids = train_test_split(
-        labels["RIDE_ID"],
-        test_size=TEST_SIZE,
-        stratify=labels["LABEL"],
-        random_state=SEED,
-    )
+    train_ids, test_ids = split_rides(labels)
 
     rides_by_id = dict(tuple(rides.groupby("ride_id")))
     X_train, y_train, ride_train = _windows_for(train_ids, rides_by_id, label_of)

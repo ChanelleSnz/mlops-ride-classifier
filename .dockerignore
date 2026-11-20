@@ -1,7 +1,7 @@
 # Keep the build context small: Docker only needs the code and the lock files
 .git
 .github
-.venv
+**/.venv
 **/__pycache__
 data
 models
@@ -15,3 +15,7 @@ dags
 .env
 monitoring
 scripts
+# Feature store: only the definitions go in the (Airflow) image, not the local store or the tests
+feature_repo/data
+feature_repo/tests
+**/.pytest_cache

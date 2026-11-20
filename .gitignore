@@ -9,6 +9,10 @@ data/**
 !data/**/
 !data/**/.gitkeep
 
+# Feature store: offline parquet, registry and online store are rebuilt, not versioned
+feature_repo/data/**
+!feature_repo/data/.gitkeep
+
 # Modèles et sorties locales
 *.pt
 mlruns/

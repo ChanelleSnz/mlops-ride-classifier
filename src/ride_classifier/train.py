@@ -30,6 +30,8 @@ from ride_classifier import data as data_module
 from ride_classifier.baseline import run_baselines
 from ride_classifier.data import CLASSES, PROCESSED_DIR, SEED
 from ride_classifier.evaluate import compute_metrics, report, ride_level
+from ride_classifier.feature_model import PARAMS as FEATURE_MODEL_PARAMS
+from ride_classifier.feature_model import train_feature_model
 from ride_classifier.model import RideCNN
 from ride_classifier.pyfunc_model import RideClassifier
 
@@ -37,6 +39,7 @@ TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5001")
 EXPERIMENT = "ride-classifier"
 MODEL_NAME = "ride-classifier"
 CHAMPION = "champion"  # alias of the model version served by the API
+FEATURE_SERVICE = "ride_classifier_v1"  # Feast feature service (feature_repo/definitions.py)
 PARAMS = {"epochs": 20, "batch_size": 64, "learning_rate": 1e-3, "dropout": 0.3}
 
 
@@ -148,6 +151,19 @@ def log_model(model: nn.Module) -> str:
     return info.registered_model_version
 
 
+def log_feature_model() -> None:
+    """Second reference model, trained on the Feast feature store (skipped if the store was not built)."""
+    result = train_feature_model()
+    if result is None:
+        mlflow.set_tag("feature_store", "not built")
+        return
+    _, metrics = result
+    mlflow.set_tag("feature_store", f"feast:{FEATURE_SERVICE}")
+    mlflow.log_params({f"feature_model_{key}": value for key, value in FEATURE_MODEL_PARAMS.items()})
+    mlflow.log_metrics({f"feature_model_{key}": value for key, value in metrics.items()})
+    print(f"\nFeature store model (random forest): macro F1 {metrics['macro_f1']:.3f}")
+
+
 def main() -> None:
     mlflow.set_tracking_uri(TRACKING_URI)
     mlflow.set_experiment(EXPERIMENT)
@@ -164,6 +180,7 @@ def main() -> None:
         )
         baseline_f1 = run_baselines()["most_frequent"]["macro_f1"]
         mlflow.log_metric("baseline_macro_f1", baseline_f1)
+        log_feature_model()
 
         model, y_true, y_pred = train(PARAMS)
         metrics = compute_metrics(y_true, y_pred)
