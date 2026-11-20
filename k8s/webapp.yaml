@@ -14,8 +14,7 @@ spec:
     spec:
       containers:
         - name: webapp
-          image: ride-classifier-webapp:dev
-          imagePullPolicy: IfNotPresent
+          image: ride-classifier-webapp  # real name and tag set in kustomization.yaml
           env:
             - {name: API_URL, value: "http://api:8000"}
             - {name: API_PUBLIC_URL, value: "http://localhost:30800"}
