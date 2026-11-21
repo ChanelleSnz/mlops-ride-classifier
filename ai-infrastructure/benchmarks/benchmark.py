@@ -89,6 +89,12 @@ def hardware_description() -> str:
     if sys.platform == "darwin":
         cpu = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True).stdout
         memory = int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout)
+    elif Path("/proc/cpuinfo").exists():  # Linux (e.g. the Vertex AI machine)
+        names = [
+            line.split(":", 1)[1] for line in Path("/proc/cpuinfo").read_text().splitlines() if "model name" in line
+        ]
+        cpu = f"{names[0].strip()} x {len(names)} vCPU" if names else platform.processor()
+        memory = int(Path("/proc/meminfo").read_text().split()[1]) * 1024  # MemTotal, in kB
     else:
         cpu, memory = platform.processor(), 0
     gigabytes = f", {memory / 2**30:.0f} GB RAM" if memory else ""
