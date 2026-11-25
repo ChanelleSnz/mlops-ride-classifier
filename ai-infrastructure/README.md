@@ -14,8 +14,8 @@ optimization and designs a scalable, cost-aware serving system.
 | Baseline benchmark | [benchmarks/benchmark.ipynb](benchmarks/benchmark.ipynb) · [benchmark.py](benchmarks/benchmark.py) · [baseline-results.csv](benchmarks/baseline-results.csv) | Done (3 runs) |
 | CPU vs GPU (GCP, T4) | [benchmarks/device_benchmark.py](benchmarks/device_benchmark.py) · [train_benchmark.py](benchmarks/train_benchmark.py) · [vertex-t4/](benchmarks/vertex-t4/) · [gpu/](gpu/) | Done (1 run) |
 | Optimization comparison | [optimization/comparison.ipynb](optimization/comparison.ipynb) · [compare.py](optimization/compare.py) · [results.csv](optimization/results.csv) | Done (ONNX Runtime, 3 runs) |
-| Distributed training decision | [distributed-training/technical-analysis.md](distributed-training/technical-analysis.md) | Draft |
-| Scaling, cost and resilience | [cost-resilience/infrastructure-plan.md](cost-resilience/infrastructure-plan.md) | To do |
+| Distributed training decision | [distributed-training/technical-analysis.md](distributed-training/technical-analysis.md) | Done: no DDP / FSDP / ZeRO |
+| Scaling, cost and resilience | [cost-resilience/infrastructure-plan.md](cost-resilience/infrastructure-plan.md) | Done: GPU jobs ≈ $0.10, proposed system ≈ $136–211 / month (estimate) |
 
 ## 1. Inventory of the current MLOps system
 
@@ -245,12 +245,12 @@ Proposed architecture ([details](architecture/proposed-system.md)); every orange
 - Distributed training: [distributed-training/technical-analysis.md](distributed-training/technical-analysis.md)
 - Serving architecture, scaling, monitoring, costs, rollback: [cost-resilience/infrastructure-plan.md](cost-resilience/infrastructure-plan.md)
 
-## Owners and next actions
+## Owners
 
-| Task | Owner | Due |
+| Task | Owner |
 |---|---|---|
-| Resource sizing (training time, RAM) | To assign | |
-| Baseline benchmark | To assign | |
-| Optimization | To assign | |
-| Distributed training analysis | To assign | |
-| Architecture, cost and resilience | To assign | |
+| Resource sizing (training time, RAM) | Luli |
+| Baseline benchmark | Luli |
+| Optimization | Wei-Ling |
+| Distributed training analysis | Chanelle |
+| Architecture, cost and resilience | Rania |
