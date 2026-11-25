@@ -9,8 +9,8 @@ optimization and designs a scalable, cost-aware serving system.
 
 | Deliverable | File | Status |
 |---|---|---|
-| Current system diagram | [architecture/current-system.md](architecture/current-system.md) | Draft (Mermaid, export to PNG) |
-| Proposed system diagram | [architecture/proposed-system.md](architecture/proposed-system.md) | To do |
+| Current system diagram | [architecture/current-system.png](architecture/current-system.png) · [.md](architecture/current-system.md) | Done |
+| Proposed system diagram | [architecture/proposed-system.png](architecture/proposed-system.png) · [.md](architecture/proposed-system.md) | Done (design, not tested) |
 | Baseline benchmark | [benchmarks/benchmark.ipynb](benchmarks/benchmark.ipynb) · [benchmark.py](benchmarks/benchmark.py) · [baseline-results.csv](benchmarks/baseline-results.csv) | Done (3 runs) |
 | CPU vs GPU (GCP, T4) | [benchmarks/device_benchmark.py](benchmarks/device_benchmark.py) · [train_benchmark.py](benchmarks/train_benchmark.py) · [vertex-t4/](benchmarks/vertex-t4/) · [gpu/](gpu/) | Done (1 run) |
 | Optimization comparison | [optimization/comparison.ipynb](optimization/comparison.ipynb) · [compare.py](optimization/compare.py) · [results.csv](optimization/results.csv) | Done (ONNX Runtime, 3 runs) |
@@ -30,7 +30,11 @@ optimization and designs a scalable, cost-aware serving system.
 | Monitoring | Prometheus + Grafana (API, model, data layers), 4 alert rules | Docker Compose (dev only) |
 
 The model does **not** run on Colab or GCP: everything runs on one Apple Silicon Mac, in prod on the local
-Kubernetes cluster of Docker Desktop.
+Kubernetes cluster of Docker Desktop. (GCP was used only for the CPU vs GPU experiment, see § 3.1.)
+
+![Current system](architecture/current-system.png)
+
+Both diagrams are drawn by code: `uv run python ai-infrastructure/architecture/draw.py` (matplotlib).
 
 ## 2. Resource sizing
 
@@ -224,6 +228,19 @@ agreement.
 3 runs; the single-ride numbers are noisy; MLflow loading is excluded from both cold starts.
 
 ## 5. Distributed training, scaling, cost and resilience
+
+![Proposed system](architecture/proposed-system.png)
+
+Proposed architecture ([details](architecture/proposed-system.md)); every orange element is a **design, not tested**:
+
+- **Serving stays on CPU** (§ 3.1: the T4 is only 1.3× faster for one ride, and costs ≈ 0.5 s of CUDA start per pod).
+- **ONNX Runtime in the API pods** (§ 4: start-up 1.4 s → 0.12 s, −250 MB per process, same predictions).
+- **Scale out, not up**: sync `/predict` + several uvicorn workers per pod (one worker serves one request at a time,
+  § 3), and an autoscaler (HPA) adding replicas on CPU / p95 latency.
+- **Batch scoring** with ONNX Runtime on CPU (§ 4: 1,323 windows in 93 ms), no GPU needed.
+- **Training on one machine**, no DDP (§ 3.1: 74–83 s on CPU, 5 s and 60 MB VRAM on one T4).
+- **Monitoring in the cluster** (today: dev only) and **recovery** with what exists: rolling update, automatic
+  rollback in CD, hot reload of the previous champion (8 ms vs ≈ 5 s pod start).
 
 - Distributed training: [distributed-training/technical-analysis.md](distributed-training/technical-analysis.md)
 - Serving architecture, scaling, monitoring, costs, rollback: [cost-resilience/infrastructure-plan.md](cost-resilience/infrastructure-plan.md)

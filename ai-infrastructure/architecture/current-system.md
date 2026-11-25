@@ -1,7 +1,11 @@
 # Current system (as implemented)
 
-Diagram of what exists **today** (not the proposed system). Export it to `current-system.png`
-(e.g. paste into https://mermaid.live, or `npx @mermaid-js/mermaid-cli -i current-system.md -o current-system.png`).
+Diagram of what exists **today** (not the proposed system).
+
+![Current system](current-system.png)
+
+The PNG is drawn by [draw.py](draw.py) (`uv run python ai-infrastructure/architecture/draw.py`). The same system as
+Mermaid, rendered directly by GitHub:
 
 ```mermaid
 flowchart LR
