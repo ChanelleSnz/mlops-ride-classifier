@@ -1,0 +1,10 @@
+torch 2.15.0, oneDNN (mkldnn) available: False
+same outputs with a contiguous input: True
+pytorch, as served             4 threads: 9 windows  2.105 ms | 1323 windows  1056.2 ms
+pytorch, contiguous input      4 threads: 9 windows  1.072 ms | 1323 windows  1211.2 ms
+pytorch      1 thread(s): 9 windows  1.302 ms | 1323 windows  1167.2 ms
+onnxruntime  1 thread(s): 9 windows  1.479 ms | 1323 windows   206.0 ms
+pytorch      2 thread(s): 9 windows  0.834 ms | 1323 windows  1059.8 ms
+onnxruntime  2 thread(s): 9 windows  0.934 ms | 1323 windows   132.4 ms
+pytorch      4 thread(s): 9 windows  0.952 ms | 1323 windows  2047.4 ms
+onnxruntime  4 thread(s): 9 windows  0.790 ms | 1323 windows   109.1 ms

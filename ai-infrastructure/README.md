@@ -13,7 +13,7 @@ optimization and designs a scalable, cost-aware serving system.
 | Proposed system diagram | [architecture/proposed-system.md](architecture/proposed-system.md) | To do |
 | Baseline benchmark | [benchmarks/benchmark.ipynb](benchmarks/benchmark.ipynb) · [benchmark.py](benchmarks/benchmark.py) · [baseline-results.csv](benchmarks/baseline-results.csv) | Done (3 runs) |
 | CPU vs GPU (GCP, T4) | [benchmarks/device_benchmark.py](benchmarks/device_benchmark.py) · [train_benchmark.py](benchmarks/train_benchmark.py) · [vertex-t4/](benchmarks/vertex-t4/) · [gpu/](gpu/) | Done (1 run) |
-| Optimization comparison | [optimization/comparison.ipynb](optimization/comparison.ipynb) | To do |
+| Optimization comparison | [optimization/comparison.ipynb](optimization/comparison.ipynb) · [compare.py](optimization/compare.py) · [results.csv](optimization/results.csv) | Done (ONNX Runtime, 3 runs) |
 | Distributed training decision | [distributed-training/technical-analysis.md](distributed-training/technical-analysis.md) | Draft |
 | Scaling, cost and resilience | [cost-resilience/infrastructure-plan.md](cost-resilience/infrastructure-plan.md) | To do |
 
@@ -171,17 +171,57 @@ Two image settings were needed for the GPU to be visible in the container (see [
 `NVIDIA_VISIBLE_DEVICES` / `NVIDIA_DRIVER_CAPABILITIES`, and `/usr/local/nvidia/{bin,lib64}` in `PATH` /
 `LD_LIBRARY_PATH`, where Vertex AI mounts the driver.
 
-## 4. Optimization
+## 4. Optimization: ONNX Runtime
 
-See [optimization/](optimization/).
+**Baseline**: the CNN run by PyTorch 2.15 eager (`torch.no_grad()`, what the MLflow pyfunc does).
+**Optimized**: the same weights exported to ONNX (opset 18, dynamic batch, 124 KB) and run by ONNX Runtime 1.32 on
+CPU with all graph optimizations. Code side by side in [optimization/](optimization/): [runtimes.py](optimization/runtimes.py)
+(both runtimes), [export_onnx.py](optimization/export_onnx.py), [compare.py](optimization/compare.py), notebook
+[comparison.ipynb](optimization/comparison.ipynb), raw results [results.csv](optimization/results.csv).
 
-| Metric | Baseline | Optimized | Interpretation |
+**Hypothesis (written before measuring, saved in the notebook):** the network for one ride ≈ 25 % faster (Conv + ReLU
+fusion, BatchNorm folded), so the whole ride ≈ 15 % faster (at most ≈ 60 %, Amdahl); no real gain for large batches
+(compute-bound); lower cold start and memory (no PyTorch: 83 MB instead of 565 MB installed); same macro F1.
+
+**Fair comparison:** same Mac M4, 4 threads for both, same weights, same preprocessing and post-processing (numpy),
+same 150 test rides, 10 warm-up + 200 timed calls, 3 runs alternating the order; cold start in a new process
+(median of 5, dataset not loaded). Correctness before timing: same prediction on 150/150 rides, logits differ by
+< 2e-6 ([export-check.json](optimization/model/export-check.json)).
+
+| Metric (median of 3 runs [min–max]) | Baseline: PyTorch | Optimized: ONNX Runtime | Interpretation |
 |---|---|---|---|
-| Mean latency (ms) | — | — | — |
-| p95 latency (ms) | — | — | — |
-| Throughput (requests/s) | — | — | — |
-| Memory usage (MB) | — | — | — |
-| Classification quality | — | — | — |
+| Mean latency, 1 ride (ms) | 1.51 [1.49–1.60] | 1.88 [1.22–2.47] | no stable gain: −19 % in one run, +66 % in another |
+| — network only, 1 ride (ms) | 0.75 [0.72–0.82] | 0.89 [0.62–1.16] | < 1 ms either way; thread scheduling dominates |
+| p95 latency, 1 ride (ms) | 2.22 [2.11–2.28] | 3.32 [1.66–4.21] | ONNX Runtime more variable at this size |
+| Throughput, batch of 1,323 windows | 944 windows/s (1,402 ms) | **14,265 windows/s (93 ms)** | **15× faster** (10–16× from 64 windows up) |
+| Throughput, 9 windows (≈ 1 ride) | 12,849 windows/s | 9,347 windows/s | small batches: no gain |
+| Cold start: import + load + 1st prediction (ms) | 1,404 | **120** | **12× faster** (import 1,400 → 93 ms) |
+| Memory: peak process RSS (MB) | 558 | **303** | **−46 %** (no PyTorch in the process) |
+| Classification quality (macro F1, 150 rides) | 0.272 | 0.272 | unchanged (150/150 same predictions) |
+
+**Hypothesis check**: confirmed for start-up, memory and quality; **not confirmed** for one ride (no stable gain);
+**wrong for large batches**, in the good direction (15× instead of "no gain").
+
+**Why** ([diagnostics.py](optimization/diagnostics.py) → [diagnostics.txt](optimization/diagnostics.txt)):
+
+- The PyTorch 2.15 build for macOS / ARM has **no oneDNN** (`torch.backends.mkldnn.is_available()` is `False`), so
+  its CPU convolution falls back to a slow path: per-window throughput drops from ≈ 12,800 (9 windows) to ≈ 900
+  windows/s (1,323 windows), and more threads do not help. ONNX Runtime uses its own optimised CPU kernels (MLAS) and
+  scales with threads (206 → 132 → 109 ms for 1 → 2 → 4 threads on 1,323 windows). The gain comes from the kernels,
+  not from the fusions; a contiguous input (instead of the transposed view) does not change PyTorch's speed.
+- For one ride (≈ 9 windows) both need < 1 ms and the result is dominated by thread scheduling on a shared Mac; the
+  fusions save too little to show. For the API, the network is only ≈ 0.8 ms of ≈ 4.5 ms per request anyway.
+- Start-up: importing ONNX Runtime takes ≈ 0.09 s against ≈ 1.4 s for PyTorch. The full API start-up would drop by
+  ≈ 1.3 s, not to 0.1 s, because MLflow and pandas are still imported.
+
+**Decision**: keep the PyTorch pyfunc as the registered, served model for now; propose ONNX Runtime for
+**batch scoring** (15× on CPU: 93 ms for the whole test set on the Mac CPU, close to the 17 ms of the T4 GPU, without a
+GPU) and for a **lighter API image** without PyTorch (faster start, ≈ 250 MB less memory per replica). Serving ONNX in
+the API is **not done**: it changes the MLflow model (export at training time, `onnx` flavour) and needs the team's
+agreement.
+
+**Limits**: one machine (Mac M4 shared with other Docker stacks, [background load](optimization/background-load.txt)),
+3 runs; the single-ride numbers are noisy; MLflow loading is excluded from both cold starts.
 
 ## 5. Distributed training, scaling, cost and resilience
 
