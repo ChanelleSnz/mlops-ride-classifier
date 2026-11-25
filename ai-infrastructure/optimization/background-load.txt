@@ -1,0 +1,11 @@
+mlops-fraud-grafana-1 0.59%
+mlops-fraud-prometheus-1 0.60%
+mlops-control-plane 23.99%
+l07-airflow-scheduler-1 2.98%
+l07-airflow-worker-1 0.53%
+l07-airflow-triggerer-1 44.11%
+l07-airflow-apiserver-1 3.20%
+l07-airflow-dag-processor-1 69.16%
+l07-postgres-1 5.74%
+l07-redis-1 0.36%
+albert-marketplace-load-generator-1 0.00%
