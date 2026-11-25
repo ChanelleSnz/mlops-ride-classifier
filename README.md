@@ -9,7 +9,7 @@ An end-to-end MLOps pipeline that classifies micromobility rides from their IMU 
 Group project at Albert School (M2) shared by two courses:
 
 - **MLOps & Model Deployment**: training, tracking, registry, API, web app, Docker, CI/CD, Kubernetes, tests.
-- **Advanced Cloud Infrastructure / AI Infrastructure**: resource sizing, benchmarking, optimization,
+- **Advanced Cloud AI Infrastructure**: resource sizing, CPU vs GPU benchmarking, optimization (ONNX Runtime),
   distributed training decision, scaling, costs and resilience (see [AI Infrastructure](#ai-infrastructure)).
 
 **Team:** Rania, Luli, Wei-Ling, Chanelle.
@@ -143,7 +143,7 @@ Test set: 150 rides never seen during training.
 | Baseline: stratified random | 0.827 | 0.198 | 0.181 | 0.000 |
 | **1D CNN (champion v1)** | 0.607 | 0.342 | **0.272** | 0.000 |
 
-The CNN beats the baselines on macro F1 (+50%). Accuracy goes down on purpose: class weights trade some "Safe"
+The CNN beats the baselines on macro F1 (+49%). Accuracy goes down on purpose: class weights trade some "Safe"
 precision for the rare classes (Bad weather: 4/7 rides found). **Reckless is not detected**: only 6 rides in total
 (4 for training, 2 for testing) — a data limitation, see [Limits](#limits-and-next-steps).
 
@@ -343,174 +343,29 @@ without a model.
 
 ## AI Infrastructure
 
-This section extends the existing MLOps project; it is not a new ML project. Its rule is
-**measure, do not claim**: every value below is either measured (with its conditions), computed from the code,
-or marked **to measure** / **TBD**. Designs and estimates are labelled as such.
+Contribution for the **Advanced Cloud AI Infrastructure** course: what the model needs to run, how fast it is, one
+optimization, and a scalable, cost-aware serving plan. It extends this MLOps project (same model, same data).
+Rule: **measure, do not claim**. Every number is tagged in the detailed report as measured, computed, estimated or
+design only.
 
-The detailed work and the **measured results** (baseline benchmark, CPU vs GPU on Vertex AI T4, ONNX Runtime comparison)
-live in [`ai-infrastructure/README.md`](ai-infrastructure/README.md). The subsections below summarise the approach.
+**Full report, code and raw results: [`ai-infrastructure/README.md`](ai-infrastructure/README.md).**
 
-Initial structure of `ai-infrastructure/`:
-
-```text
-ai-infrastructure/
-├── README.md
-├── architecture/
-│   ├── current-system.png
-│   └── proposed-system.png
-├── benchmarks/
-│   ├── benchmark.ipynb
-│   └── baseline-results.csv
-├── optimization/
-│   └── comparison.ipynb
-├── distributed-training/
-│   └── technical-analysis.md
-└── cost-resilience/
-    └── infrastructure-plan.md
-```
-
-### 1. Inventory of the current system
-
-| Component | Status | Where |
+| Step | Main result | Details |
 | --- | --- | --- |
-| Preprocessing | done | `data.py` |
-| Training (PyTorch, CPU) | done | `train.py` |
-| Tracking, model storage, versioning | done | MLflow + PostgreSQL + MinIO |
-| Prediction API | done | `api.py` (FastAPI) |
-| Docker images | done | `docker/`, Docker Hub |
-| CI/CD | done | `.github/workflows/` |
-| Kubernetes (local) | done | `k8s/` |
-| Monitoring (Prometheus + Grafana) | done (dev stack) | `monitoring/`, see [Monitoring](#monitoring) |
+| Resource sizing | 24,677 parameters (0.1 MB of weights); training 82.8 s on the Mac CPU, peak RAM 970 MB; API process ≈ 218 MB. **One machine is enough.** | [§ 2](ai-infrastructure/README.md#2-resource-sizing) |
+| CPU baseline (Mac M4) | model 1.8 ms and API 4.5 ms per ride (mean); ≈ 220–245 requests/s per worker, but one request at a time (p95 7 → 49 ms from 1 to 8 clients); cold start ≈ 5 s, hot reload 8 ms | [§ 3](ai-infrastructure/README.md#3-baseline-benchmark), [`benchmarks/`](ai-infrastructure/benchmarks/) |
+| CPU vs GPU (Vertex AI, 1 spot NVIDIA T4) | one ride: GPU only **1.3× faster**, + 0.5 s CUDA start per pod; big batches up to 45×; training 74 s (CPU) vs 5 s (T4) | [§ 3.1](ai-infrastructure/README.md#31-cpu-vs-gpu-on-gcp-vertex-ai-t4), [`gpu/`](ai-infrastructure/gpu/) |
+| Optimization: ONNX Runtime | same predictions (150 / 150 rides); start 1.4 s → 0.12 s, memory −46 %, big batches 15× faster; no stable gain for one ride (hypothesis written before measuring) | [§ 4](ai-infrastructure/README.md#4-optimization-onnx-runtime), [`optimization/`](ai-infrastructure/optimization/) |
+| Distributed training | **no DDP, FSDP or ZeRO**: one T4 trains in 5 s using 60 MB of its 15 GB; communication would cost more than it saves | [technical-analysis.md](ai-infrastructure/distributed-training/technical-analysis.md) |
+| Scaling, cost, resilience | serving stays on **CPU** (a T4 node ≈ $447 / month vs ≈ $54 for a CPU node, for 1.3×); proposed GKE system ≈ $211 / month (≈ $136 with the free tier); our GPU experiments cost ≈ $0.10; 8 failure scenarios with recovery | [infrastructure-plan.md](ai-infrastructure/cost-resilience/infrastructure-plan.md) |
 
-**Where it runs:** training and serving run locally on a developer Mac (Apple Silicon, CPU only) and on the local
-Kubernetes cluster of Docker Desktop. Google Colab and GCP are optional and not used yet. The current-system
-diagram is in [Architecture](#architecture).
-
-### 2. Resource sizing
-
-| Item | Value | Source |
-| --- | --- | --- |
-| Framework | PyTorch 2.15.0 (CPU build on Linux), MLflow 3.18.0 | `uv.lock` |
-| Model | `RideCNN`: 3 conv blocks (32, 64, 64 channels) + global average pooling + linear layer | `model.py` |
-| Parameters | 24,677 (about 96 KB in float32) | computed from the architecture |
-| Model file size (MB) | to measure | `ride_cnn.pt` and the full MLflow artifact |
-| Dataset | 28.8 MB on disk, 1,529,547 rows, 500 rides | measured |
-| Input shape | `(batch, 600, 6)`: 600 time steps, 6 sensors, float32 | `data.py` |
-| Samples (windows) | to measure (printed by `python -m ride_classifier.data`) | `data.py` |
-| Train / test split | 350 / 150 rides (70 / 30, stratified) | `data.py` |
-| Training hyperparameters | 20 epochs, batch size 64, Adam, learning rate 1e-3, dropout 0.3 | `train.py` |
-| Training hardware | CPU of the developer Mac (exact model, cores, RAM: TBD) | to complete |
-| Training duration | to measure | wall-clock time of `train.py` |
-| Peak RAM during training | to measure | |
-| GPU / VRAM | none used | `train.py` has no `.to("cuda")` |
-| Serving resources | API pod: request 250m CPU / 768Mi, limit 2Gi | `k8s/api.yaml` |
-| MLflow server memory | about 800 MB with 2 workers | measured, noted in `k8s/mlflow.yaml` |
-
-**Is one machine enough?** Our assessment, to confirm with the measurements above: yes. The model is tiny, the
-full dataset fits in memory many times over, and training runs on a laptop CPU.
-
-### 3. Baseline benchmark
-
-**Procedure** (to implement in `ai-infrastructure/benchmarks/benchmark.ipynb`):
-
-- Fixed model: one registered version of `ride-classifier` (version number recorded with the results).
-- Fixed workload: the test rides of the ride-level split, with the same preprocessing as training.
-- Two levels: (a) the model alone (`pyfunc.predict` on one ride, in-process), (b) the HTTP API (`POST /predict`).
-- Warm-up runs first, then repeated predictions; report mean and p95 latency, throughput, peak memory.
-- Record the CPU, the number of PyTorch threads, batch size (one ride = all its windows) and concurrency.
-- No GPU is used, so no CUDA synchronisation is needed; if a GPU is used later, call `torch.cuda.synchronize()`
-  before reading the clock.
-- Raw measurements saved to `ai-infrastructure/benchmarks/baseline-results.csv`.
-
-| Metric | Value | Measurement conditions |
-| --- | --- | --- |
-| Model and version | `ride-classifier` vTBD | PyTorch 2.15.0, MLflow 3.18.0 pyfunc |
-| Hardware | TBD | CPU / RAM (no GPU) |
-| Model size (MB) | to measure | serialized model file |
-| Mean latency (ms) | to measure | one ride per request, N repetitions after warm-up |
-| p95 latency (ms) | to measure | same |
-| Throughput (requests/s) | to measure | concurrency and test duration TBD |
-| Memory usage (MB) | to measure | CPU RAM of the API process |
-| Classification quality | to measure | macro F1 on the 150 test rides |
-
-### 4. Optimization
-
-**Candidate:** export the network to **ONNX** and run it with **ONNX Runtime** (CPU), keeping the same
-preprocessing. Dynamic quantization in PyTorch only covers `Linear` / recurrent layers, so it would barely touch
-this convolutional model; static quantization of the `Conv1d` layers is a possible second experiment.
-
-**Hypothesis:** ONNX Runtime lowers the per-ride latency on CPU with the same predictions (macro F1 unchanged).
-
-**Fair comparison:** same model version, same test rides, same hardware, same number of threads, same warm-up and
-repetitions. A slower optimized model is still a valid result if it is explained.
-
-| Metric | Baseline | Optimized | Interpretation |
-| --- | --- | --- | --- |
-| Mean latency (ms) | to measure | to measure | TBD |
-| p95 latency (ms) | to measure | to measure | TBD |
-| Throughput (requests/s) | to measure | to measure | TBD |
-| Memory usage (MB) | to measure | to measure | TBD |
-| Classification quality | to measure | to measure | TBD |
-
-Status: not started. Notebook: `ai-infrastructure/optimization/comparison.ipynb`.
-
-### 5. Distributed training decision
-
-**Decision: no distributed training (no DDP, FSDP or ZeRO).** Reasons, from the facts above:
-
-- The model has 24,677 parameters: it fits on any single device, so model sharding (FSDP, ZeRO) has nothing to shard.
-- The dataset is 28.8 MB on disk and fits in RAM: data parallelism (DDP) would mostly add communication overhead
-  (gradient synchronisation at every step) to a computation that is already small.
-- No GPU is needed for this workload, and the course does not require multi-GPU training.
-
-This decision should be checked again if the training duration measured in section 2 becomes a bottleneck, or if
-the much larger `SRV3490` dataset (3,490 rides, 256 MB) is used. Even then, a single machine with a GPU or more
-data-loader workers would be the first step. Details: `ai-infrastructure/distributed-training/technical-analysis.md`.
-
-### 6. Scaling, cost and resilience
-
-**Proposed serving architecture (design, not deployed):**
-
-- CPU-only API pods behind a Kubernetes Service, stateless, model loaded from the MLflow registry.
-- **Horizontal Pod Autoscaler** on CPU usage (min 2 replicas), with thresholds chosen from the benchmark.
-  *Not implemented and not tested yet.*
-- **Monitoring:** Prometheus metrics from the API (request rate, latency p95, errors, predictions per class) and
-  Grafana dashboards. *Implemented in the dev stack; next step: deploy it in the cluster.*
-- MLflow, PostgreSQL and MinIO stay single-replica with persistent volumes; in a cloud setup they would move to
-  managed services (Cloud SQL and Cloud Storage on GCP, for example).
-
-**Cost estimate:** to compute with explicit assumptions, using the provider's pricing page.
-
-| Assumption | Value |
+| Current system (implemented and tested) | Proposed system (design, not tested) |
 | --- | --- |
-| Provider and region | TBD (for example GCP, `europe-west1`) |
-| Machine type for the API | TBD (CPU only, sized from the benchmark) |
-| Number of replicas and usage hours per month | TBD |
-| Request volume per month | TBD |
-| Storage (MLflow artifacts, database) | TBD |
-| **Approximate monthly cost** | **TBD** |
+| [![Current system](ai-infrastructure/architecture/current-system.png)](ai-infrastructure/architecture/current-system.png) | [![Proposed system](ai-infrastructure/architecture/proposed-system.png)](ai-infrastructure/architecture/proposed-system.png) |
 
-If GCP is used, remaining credits are monitored and unused resources are shut down after each session.
-
-**Recovery and rollback (implemented):**
-
-- **Bad deployment:** `deploy.yml` smoke-tests the API after each rollout and runs `kubectl rollout undo`
-  automatically if any step fails. Images are tagged with the commit SHA, so any previous version can be redeployed.
-- **Bad model:** a new model only becomes `champion` if its macro F1 is better. To roll back by hand, point the
-  `champion` alias to the previous version in MLflow, then call `POST /model/reload`.
-- **Pod failure:** readiness, startup and liveness probes; 2 API replicas with `maxUnavailable: 0`.
-- **Data loss:** PostgreSQL and MinIO use persistent volumes. Backups: TBD.
-
-### Responsibilities and next actions
-
-| Task | Owner | Status |
-| --- | --- | --- |
-| Current and proposed architecture diagrams | TBD | to do |
-| Resource inventory (hardware, training time, model size) | TBD | to do |
-| Baseline benchmark notebook and raw results | Luli | done, see `ai-infrastructure/` |
-| ONNX Runtime optimization and comparison | Wei-Ling | done, see `ai-infrastructure/` |
-| Distributed training analysis | Chanelle | done, see `ai-infrastructure/` |
-| Cost and resilience plan | TBD | to do |
+**Not tested:** the autoscaler, a node failure, backups and a managed cluster are designs; the CD rollback, the
+probes and the model hot reload exist and run today. Owners of each part: see
+[`ai-infrastructure/README.md`](ai-infrastructure/README.md#owners).
 
 ## Problems met and how we solved them
 
@@ -532,7 +387,7 @@ If GCP is used, remaining credits are monitored and unused resources are shut do
 - Test set of 150 rides only: scores vary between runs and machines → cross-validation.
 - Monitoring runs in the dev environment; next step: deploy Prometheus and Grafana in the cluster with the official Helm charts.
 - MinIO image only available as `latest` for free (Chainguard) → mirror a fixed version in our own registry.
-- Horizontal Pod Autoscaler and cost estimate: designed, not deployed (see [AI Infrastructure](#ai-infrastructure)).
+- Horizontal Pod Autoscaler, managed cluster and backups: designed and costed, not deployed (see [AI Infrastructure](#ai-infrastructure)).
 
 ## Screenshots
 
